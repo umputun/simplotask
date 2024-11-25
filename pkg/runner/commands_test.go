@@ -164,7 +164,7 @@ func Test_execCmd(t *testing.T) {
 	ctx := context.Background()
 	connector, connErr := executor.NewConnector("testdata/test_ssh_key", time.Second*10, logs)
 	require.NoError(t, connErr)
-	sess, errSess := connector.Connect(ctx, testingHostAndPort, "my-hostAddr", "test")
+	sess, errSess := connector.Connect(ctx, testingHostAndPort, "my-hostAddr", "test", []string{})
 	require.NoError(t, errSess)
 
 	t.Run("copy a single file", func(t *testing.T) {
@@ -427,7 +427,7 @@ func Test_execCmdWithTmp(t *testing.T) {
 	logs := executor.MakeLogs(false, false, nil)
 	connector, connErr := executor.NewConnector("testdata/test_ssh_key", time.Second*10, logs)
 	require.NoError(t, connErr)
-	sess, errSess := connector.Connect(ctx, testingHostAndPort, "my-hostAddr", "test")
+	sess, errSess := connector.Connect(ctx, testingHostAndPort, "my-hostAddr", "test", []string{})
 	require.NoError(t, errSess)
 
 	extractTmpPath := func(log string) string {
