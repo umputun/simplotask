@@ -23,8 +23,8 @@ type Connector struct {
 	logs                  Logs
 }
 
-// In the ProxyCommand variables can be used %h, %p, %r (%r - username)
-// before executing the command they needs to be replaced with the actual values
+// SubstituteProxyCommand updates variables with values associated with the target host.
+// SSH ProxyCommand can use placeholders such as %h, %p, and %r (%r - username), they have to be replaced with the actual values.
 func SubstituteProxyCommand(username, address string, proxyCommand []string) ([]string, error) {
 	if len(proxyCommand) == 0 {
 		return []string{}, nil
@@ -158,13 +158,19 @@ func (c *Connector) sshClient(ctx context.Context, host, user string, proxyComma
 	}
 
 	if len(proxyCommand) == 0 {
+		var (
+			ncc   ssh.Conn
+			chans <-chan ssh.NewChannel
+			reqs  <-chan *ssh.Request
+		)
+
 		dialer := net.Dialer{Timeout: c.timeout}
 		conn, err = dialer.DialContext(ctx, "tcp", host)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial: %w", err)
 		}
 
-		ncc, chans, reqs, err := ssh.NewClientConn(conn, host, conf)
+		ncc, chans, reqs, err = ssh.NewClientConn(conn, host, conf)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create client connection to %s: %v", host, err)
 		}
