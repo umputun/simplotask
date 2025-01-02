@@ -78,11 +78,12 @@ type Target struct {
 
 // Destination defines destination info
 type Destination struct {
-	Name string   `yaml:"name" toml:"name"`
-	Host string   `yaml:"host" toml:"host"`
-	Port int      `yaml:"port" toml:"port"`
-	User string   `yaml:"user" toml:"user"`
-	Tags []string `yaml:"tags" toml:"tags"`
+	Name         string   `yaml:"name" toml:"name"`
+	Host         string   `yaml:"host" toml:"host"`
+	Port         int      `yaml:"port" toml:"port"`
+	User         string   `yaml:"user" toml:"user"`
+	Tags         []string `yaml:"tags" toml:"tags"`
+	ProxyCommand []string `yaml:"proxy_command" toml:"proxy_command"`
 }
 
 // Overrides defines override for task passed from cli
