@@ -1165,3 +1165,24 @@ func captureStdOut(t *testing.T, f func()) string {
 	io.Copy(&buf, r)
 	return buf.String()
 }
+
+func Test_isLocalHost(t *testing.T) {
+	tests := []struct {
+		name     string
+		hostAddr string
+		want     bool
+	}{
+		{name: "localhost without port", hostAddr: "localhost", want: true},
+		{name: "localhost with port", hostAddr: "localhost:22", want: true},
+		{name: "127.0.0.1 without port", hostAddr: "127.0.0.1", want: true},
+		{name: "127.0.0.1 with port", hostAddr: "127.0.0.1:22", want: true},
+		{name: "127.2.0.1 with port", hostAddr: "127.2.0.1:22", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isLocalHost(tt.hostAddr); got != tt.want {
+				t.Errorf("isLocalHost() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

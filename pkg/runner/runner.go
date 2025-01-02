@@ -138,7 +138,6 @@ func (p *Process) Run(ctx context.Context, task, target string) (s ProcResp, err
 
 // Gen generates the list target hosts for a given target, applying templates.
 func (p *Process) Gen(targets []string, tmplRdr io.Reader, respWr io.Writer) error {
-
 	targetHosts := []config.Destination{}
 	for _, target := range targets {
 		hosts, err := p.Playbook.TargetHosts(target)
@@ -181,7 +180,7 @@ func (p *Process) runTaskOnHost(ctx context.Context, tsk *config.Task, hostAddr,
 	stTask := time.Now()
 
 	var remote executor.Interface
-	if p.anyRemoteCommand(tsk) {
+	if p.anyRemoteCommand(tsk) && !isLocalHost(hostAddr) {
 		// make remote executor only if there is a remote command in the taks
 		var err error
 		remote, err = p.Connector.Connect(ctx, hostAddr, hostName, user)
@@ -226,8 +225,10 @@ func (p *Process) runTaskOnHost(ctx context.Context, tsk *config.Task, hostAddr,
 		log.Printf("[INFO] %s", p.infoMessage(cmd, hostAddr, hostName))
 		stCmd := time.Now()
 
-		ec := execCmd{cmd: cmd, hostAddr: hostAddr, hostName: hostName, tsk: &activeTask, exec: remote,
-			verbose: p.Verbose, verbose2: p.Verbose2, sshShell: p.SSHShell, onExit: cmd.OnExit}
+		ec := execCmd{
+			cmd: cmd, hostAddr: hostAddr, hostName: hostName, tsk: &activeTask, exec: remote,
+			verbose: p.Verbose, verbose2: p.Verbose2, sshShell: p.SSHShell, onExit: cmd.OnExit,
+		}
 		ec = p.pickCmdExecutor(cmd, ec, hostAddr, hostName) // pick executor on dry run or local command
 
 		repHostAddr, repHostName := ec.hostAddr, ec.hostName
@@ -275,7 +276,7 @@ func (p *Process) runTaskOnHost(ctx context.Context, tsk *config.Task, hostAddr,
 		}
 	}
 
-	if p.anyRemoteCommand(&activeTask) {
+	if p.anyRemoteCommand(&activeTask) && !isLocalHost(hostAddr) {
 		report(hostAddr, hostName, "completed task %q, commands: %d (%v)\n", activeTask.Name, resp.count, since(stTask))
 	} else {
 		report("localhost", "", "completed task %q, commands: %d (%v)\n",
@@ -289,7 +290,6 @@ func (p *Process) runTaskOnHost(ctx context.Context, tsk *config.Task, hostAddr,
 // It detects the command type based on the fields what are set.
 // Even if multiple fields for multiple commands are set, only one will be executed.
 func (p *Process) execCommand(ctx context.Context, ec execCmd) (resp execCmdResp, err error) {
-
 	if ec.cmd.OnExit != "" {
 		// register on-exit command if any set
 		defer func() {
@@ -347,7 +347,7 @@ func (p *Process) pickCmdExecutor(cmd config.Cmd, ec execCmd, hostAddr, hostName
 		}
 		return ec
 	}
-	if cmd.Options.Local {
+	if cmd.Options.Local || isLocalHost(hostAddr) {
 		log.Printf("[DEBUG] run local command %q", cmd.Name)
 		ec.exec = executor.NewLocal(p.Logs.WithHost("localhost", ""))
 		return ec
@@ -357,7 +357,6 @@ func (p *Process) pickCmdExecutor(cmd config.Cmd, ec execCmd, hostAddr, hostName
 
 // onError executes on-error command locally if any error occurred during task execution and on-error command is defined
 func (p *Process) onError(ctx context.Context, err error) {
-
 	// unwrapError unwraps error to get execCmdErr with all details about command execution
 	unwrapError := func(err error) (execCmdErr, bool) {
 		execErr := &execCmdErr{}
@@ -460,7 +459,6 @@ func (p *Process) updateVars(vars map[string]string, cmd config.Cmd, tsk *config
 // of hosts. If the onlyOn field is empty, the command will be executed on all hosts.
 // It also checks if the command is in the 'only' or 'skip' list, and considers the 'NoAuto' option.
 func (p *Process) shouldRunCmd(cmd config.Cmd, hostName, hostAddr string) bool {
-
 	if len(p.Only) > 0 && !stringutils.Contains(cmd.Name, p.Only) {
 		log.Printf("[DEBUG] skip command %q, not in only list", cmd.Name)
 		return false
@@ -492,5 +490,16 @@ func (p *Process) shouldRunCmd(cmd config.Cmd, hostName, hostAddr string) bool {
 	}
 
 	log.Printf("[DEBUG] skip command %q, not in only_on list", cmd.Name)
+	return false
+}
+
+func isLocalHost(hostAddr string) bool {
+	pt := strings.Split(hostAddr, ":")
+	if len(pt) == 1 {
+		return hostAddr == "127.0.0.1" || hostAddr == "localhost"
+	}
+	if len(pt) == 2 {
+		return pt[0] == "127.0.0.1" || pt[0] == "localhost"
+	}
 	return false
 }
