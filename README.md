@@ -179,6 +179,8 @@ targets:
     hosts: # list of hosts, user, name and port optional. 
       - {host: "h1.example.com", user: "user2", name: "h1"}
       - {host: "h2.example.com", port: 2222}
+      # command will be executed on local if host is localhost or 127.0.0.1
+      - {host: "localhost", port: 2222}
   staging:
     groups: ["dev", "staging"] # list of groups from inventory file
   dev:
