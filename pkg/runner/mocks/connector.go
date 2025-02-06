@@ -47,7 +47,7 @@ type ConnectorMock struct {
 }
 
 // Connect calls ConnectFunc.
-func (mock *ConnectorMock) Connect(ctx context.Context, hostAddr string, hostName string, user string) (*executor.Remote, error) {
+func (mock *ConnectorMock) Connect(ctx context.Context, hostAddr, hostName, user string, proxyCommand []string) (*executor.Remote, error) {
 	if mock.ConnectFunc == nil {
 		panic("ConnectorMock.ConnectFunc: method is nil but Connector.Connect was just called")
 	}

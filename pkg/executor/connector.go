@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -20,6 +21,31 @@ type Connector struct {
 	enableAgent           bool
 	enableAgentForwarding bool
 	logs                  Logs
+}
+
+// SubstituteProxyCommand updates variables with values associated with the target host.
+// SSH ProxyCommand can use placeholders such as %h, %p, and %r (%r - username), they have to be replaced with the actual values.
+func SubstituteProxyCommand(username, address string, proxyCommand []string) ([]string, error) {
+	if len(proxyCommand) == 0 {
+		return []string{}, nil
+	}
+
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("failed to split hostAddr and port: %w", err)
+	}
+
+	cmdArgs := make([]string, len(proxyCommand))
+
+	for i, arg := range proxyCommand {
+		arg = strings.Replace(arg, "%h", host, -1)
+		if port != "" {
+			arg = strings.Replace(arg, "%p", port, -1)
+		}
+		arg = strings.Replace(arg, "%r", username, -1)
+		cmdArgs[i] = arg
+	}
+	return cmdArgs, nil
 }
 
 // NewConnector creates a new Connector for a given user and private key.
@@ -52,9 +78,9 @@ func (c *Connector) WithAgentForwarding() *Connector {
 }
 
 // Connect connects to a remote hostAddr and returns a remote executer, caller must close.
-func (c *Connector) Connect(ctx context.Context, hostAddr, hostName, user string) (*Remote, error) {
-	log.Printf("[DEBUG] connect to %q (%s), user %q", hostAddr, hostName, user)
-	client, err := c.sshClient(ctx, hostAddr, user)
+func (c *Connector) Connect(ctx context.Context, hostAddr, hostName, user string, proxyCommand []string) (*Remote, error) {
+	log.Printf("[DEBUG] connect to %q (%s), user %q, proxy command: %s", hostAddr, hostName, user, proxyCommand)
+	client, err := c.sshClient(ctx, hostAddr, user, proxyCommand)
 	if err != nil {
 		return nil, err
 	}
@@ -89,27 +115,73 @@ func (c *Connector) forwardAgent(client *ssh.Client) error {
 	return nil
 }
 
-func (c *Connector) sshClient(ctx context.Context, host, user string) (session *ssh.Client, err error) {
+func sshDialWithProxy(ctx context.Context, host string, cmdArgs []string, config *ssh.ClientConfig) (*ssh.Client, error) {
+
+	client, server := net.Pipe()
+
+	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+	cmd.Stdin = server
+	cmd.Stdout = server
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	ncc, chans, reqs, err := ssh.NewClientConn(client, host, config)
+	if err != nil {
+		return nil, err
+	}
+
+	return ssh.NewClient(ncc, chans, reqs), nil
+
+}
+
+func (c *Connector) sshClient(ctx context.Context, host, user string, proxyCommand []string) (session *ssh.Client, err error) {
+	var conn net.Conn
+	var client *ssh.Client
+
 	log.Printf("[DEBUG] create ssh session to %s, user %s", host, user)
+	log.Printf("[DEBUG] ProxyCommand %s ", proxyCommand)
 	if !strings.Contains(host, ":") {
 		host += ":22"
 	}
 
-	dialer := net.Dialer{Timeout: c.timeout}
-	conn, err := dialer.DialContext(ctx, "tcp", host)
+	cmdArgs, err := SubstituteProxyCommand(user, host, proxyCommand)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial: %w", err)
+		return nil, fmt.Errorf("failed to parse proxy command: %w", err)
 	}
 
 	conf, err := c.sshConfig(user, c.privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ssh config: %w", err)
 	}
-	ncc, chans, reqs, err := ssh.NewClientConn(conn, host, conf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create client connection to %s: %v", host, err)
+
+	if len(proxyCommand) == 0 {
+		var (
+			ncc   ssh.Conn
+			chans <-chan ssh.NewChannel
+			reqs  <-chan *ssh.Request
+		)
+
+		dialer := net.Dialer{Timeout: c.timeout}
+		conn, err = dialer.DialContext(ctx, "tcp", host)
+		if err != nil {
+			return nil, fmt.Errorf("failed to dial: %w", err)
+		}
+
+		ncc, chans, reqs, err = ssh.NewClientConn(conn, host, conf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create client connection to %s: %v", host, err)
+		}
+		client = ssh.NewClient(ncc, chans, reqs)
+
+	} else {
+		client, err = sshDialWithProxy(ctx, host, cmdArgs, conf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create client connection wtth proxy command %s, to %s: %v", proxyCommand, host, err)
+		}
 	}
-	client := ssh.NewClient(ncc, chans, reqs)
 
 	if err := c.forwardAgent(client); err != nil {
 		return nil, fmt.Errorf("failed to forward agent to %s: %v", host, err)

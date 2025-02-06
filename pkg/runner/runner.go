@@ -44,7 +44,7 @@ type Process struct {
 
 // Connector is an interface for connecting to a host, and returning remote executer.
 type Connector interface {
-	Connect(ctx context.Context, hostAddr, hostName, user string) (*executor.Remote, error)
+	Connect(ctx context.Context, hostAddr, hostName, user string, proxyCommand []string) (*executor.Remote, error)
 }
 
 // Playbook is an interface for getting task and target information from playbook.
@@ -101,7 +101,8 @@ func (p *Process) Run(ctx context.Context, task, target string) (s ProcResp, err
 			if tsk.User != "" {
 				user = tsk.User // override user from task if any set
 			}
-			resp, e := p.runTaskOnHost(ctx, tsk, fmt.Sprintf("%s:%d", host.Host, host.Port), host.Name, user)
+
+			resp, e := p.runTaskOnHost(ctx, tsk, fmt.Sprintf("%s:%d", host.Host, host.Port), host.Name, user, host.ProxyCommand)
 			if i == 0 {
 				atomic.AddInt32(&commands, int32(resp.count))
 			}
@@ -173,7 +174,7 @@ func (p *Process) Gen(targets []string, tmplRdr io.Reader, respWr io.Writer) err
 
 // runTaskOnHost executes all commands of a task on a target host. hostAddr can be a remote host or localhost with port.
 // returns number of executed commands, vars from all commands and error if any.
-func (p *Process) runTaskOnHost(ctx context.Context, tsk *config.Task, hostAddr, hostName, user string) (taskOnHostResp, error) {
+func (p *Process) runTaskOnHost(ctx context.Context, tsk *config.Task, hostAddr, hostName, user string, proxyCommand []string) (taskOnHostResp, error) {
 	report := func(hostAddr, hostName, f string, vals ...any) {
 		p.Logs.WithHost(hostAddr, hostName).Info.Printf(f, vals...)
 	}
@@ -185,7 +186,7 @@ func (p *Process) runTaskOnHost(ctx context.Context, tsk *config.Task, hostAddr,
 	if p.anyRemoteCommand(tsk) {
 		// make remote executor only if there is a remote command in the taks
 		var err error
-		remote, err = p.Connector.Connect(ctx, hostAddr, hostName, user)
+		remote, err = p.Connector.Connect(ctx, hostAddr, hostName, user, proxyCommand)
 		if err != nil {
 			if hostName != "" {
 				return taskOnHostResp{}, fmt.Errorf("can't connect to %s, user: %s: %w", hostName, user, err)
